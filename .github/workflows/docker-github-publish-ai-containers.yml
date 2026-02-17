@@ -1,6 +1,7 @@
 name: AI Containers Release - Build and Publish
 
 on:
+  workflow_dispatch: #TODO temp for testing
   push:
     tags:
       - "ai/*"
@@ -68,7 +69,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          push: true
+          push: false # TODO temp for testing only
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/arm64
@@ -77,23 +78,16 @@ jobs:
           provenance: false
 
       # Images are ready. Now modify files and create a PR.
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
       - name: Update AI container images references
-        env:
-          PUBLIC_IMAGE_REGISTRY_BASE: ${{ env.GHCR_DESTINATION_ORG }}/
         run: |
-          echo "##### Installing libasound2-dev..."
-          sudo apt install libasound2-dev
-          echo "##### Installing build dependencies..."
-          pip install --upgrade pip build
-          echo "##### Installing module as installable module..."
-          pip install -e ".[dev]"
-          echo "##### Update references..."
-          arduino-bricks-update-ai-container-ref -v ${{ steps.meta.outputs.version }} -r ${{ env.GHCR_DESTINATION_ORG }}/
+          VERSION="${{ steps.meta.outputs.version }}"
+          echo "Updating ei-models-runner references to version ${VERSION}"
+          find src -name "brick_compose.yaml" | while read f; do
+            if grep -q "ei-models-runner" "$f"; then
+              echo "  Updating: $f"
+              sed -i -E "s|ei-models-runner:[0-9]+\.[0-9]+\.[0-9]+|ei-models-runner:${VERSION}|g" "$f"
+            fi
+          done
 
       - name: Configure Git
         run: |
@@ -117,4 +111,4 @@ jobs:
             It includes modifications to update AI container images references after new release.
           branch: ${{ steps.push_changes.outputs.branch_name }}
           base: main # Target branch for the PR
-          draft: false
+          draft: true #TODO temp for testing
