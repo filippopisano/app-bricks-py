@@ -164,18 +164,3 @@ jobs:
           build-args: |
             REGISTRY=${{ env.DEV_REGISTRY_PATH }}
             BASE_IMAGE_VERSION=${{ steps.meta.outputs.version }}
-
-      # TODO: once all packages are manually set to private in the GHCR UI, this step can be removed.
-      # (ghcr.io/<owner> → Package settings → Change visibility → Private)
-      - name: Ensure package visibility is private
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          OWNER="${{ github.repository_owner }}"
-          PKG=$(python3 -c "import urllib.parse; print(urllib.parse.quote('app-bricks/${{ matrix.container }}', safe=''))")
-          ACCOUNT_TYPE=$(gh api "/users/$OWNER" --jq '.type')
-          if [[ "$ACCOUNT_TYPE" == "Organization" ]]; then
-            gh api --method PATCH "/orgs/$OWNER/packages/container/${PKG}" -f visibility=private
-          else
-            gh api --method PATCH "/user/packages/container/${PKG}" -f visibility=private
-          fi

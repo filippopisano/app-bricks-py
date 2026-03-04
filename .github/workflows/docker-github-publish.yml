@@ -173,20 +173,6 @@ jobs:
             # Set the base image registry. This is used to build the image only.
             REGISTRY=ghcr.io/arduino/
 
-      # TODO: once the package is manually set to private in the GHCR UI, this step can be removed.
-      # (ghcr.io/<owner> → Package settings → Change visibility → Private)
-      - name: Ensure package visibility is private
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          OWNER="${{ github.repository_owner }}"
-          ACCOUNT_TYPE=$(gh api "/users/$OWNER" --jq '.type')
-          if [[ "$ACCOUNT_TYPE" == "Organization" ]]; then
-            gh api --method PATCH "/orgs/$OWNER/packages/container/app-bricks%2Fpython-apps-base" -f visibility=private
-          else
-            gh api --method PATCH "/user/packages/container/app-bricks%2Fpython-apps-base" -f visibility=private
-          fi
-
   retag:
     runs-on: ubuntu-latest
     needs: [check-changes]
@@ -211,17 +197,3 @@ jobs:
           crane copy \
             ${{ env.GHCR_DESTINATION_ORG }}/app-bricks/python-apps-base:${PREV_VERSION} \
             ${{ env.GHCR_DESTINATION_ORG }}/app-bricks/python-apps-base:${NEW_VERSION}
-
-      # TODO: once the package is manually set to private in the GHCR UI, this step can be removed.
-      # (ghcr.io/<owner> → Package settings → Change visibility → Private)
-      - name: Ensure package visibility is private
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          OWNER="${{ github.repository_owner }}"
-          ACCOUNT_TYPE=$(gh api "/users/$OWNER" --jq '.type')
-          if [[ "$ACCOUNT_TYPE" == "Organization" ]]; then
-            gh api --method PATCH "/orgs/$OWNER/packages/container/app-bricks%2Fpython-apps-base" -f visibility=private
-          else
-            gh api --method PATCH "/user/packages/container/app-bricks%2Fpython-apps-base" -f visibility=private
-          fi
