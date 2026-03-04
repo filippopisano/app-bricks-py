@@ -146,6 +146,7 @@ jobs:
         with:
           tags: |
             type=ref,event=branch
+            type=ref,event=branch,suffix=-${{ github.run_number }}
           images: ghcr.io/${{ github.repository_owner }}/app-bricks/${{ matrix.container }}
 
       - name: Build and push Docker image
@@ -162,6 +163,7 @@ jobs:
           provenance: false
           build-args: |
             REGISTRY=${{ env.DEV_REGISTRY_PATH }}
+            BASE_IMAGE_VERSION=${{ steps.meta.outputs.version }}
 
       # TODO: once all packages are manually set to private in the GHCR UI, this step can be removed.
       # (ghcr.io/<owner> → Package settings → Change visibility → Private)
