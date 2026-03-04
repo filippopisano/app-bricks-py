@@ -49,8 +49,10 @@ jobs:
           BEFORE="${{ github.event.before }}"
           ZERO_SHA="0000000000000000000000000000000000000000"
 
-          if [[ "$BEFORE" == "$ZERO_SHA" ]]; then
-            # New branch: compare against main
+          # Fall back to origin/main if BEFORE is the zero SHA (new branch)
+          # or if the commit no longer exists (e.g. after a force-push/amend)
+          if [[ "$BEFORE" == "$ZERO_SHA" ]] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "Before SHA not available, falling back to origin/main"
             BEFORE=$(git rev-parse origin/main 2>/dev/null || echo "")
             if [[ -z "$BEFORE" ]]; then
               echo "No base commit found, skipping builds"
