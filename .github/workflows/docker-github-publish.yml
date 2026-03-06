@@ -137,7 +137,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Build and upload whl
+      - name: Build whl
         env:
           PUBLIC_IMAGE_REGISTRY_BASE: ${{ env.GHCR_DESTINATION_ORG }}/
           # Explicitly set the version so setuptools_scm does not need the git tag to exist
@@ -147,6 +147,13 @@ jobs:
           pip install go-task-bin==${{ env.TASKFILE_VERSION }}
           task init:ci
           task build
+
+      - name: Share whl with downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: whl
+          path: dist/arduino*.whl
+          retention-days: 1
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -166,9 +173,6 @@ jobs:
       needs.detect.outputs.no_match == 'false' &&
       needs.detect.outputs.needs_build == 'true' &&
       (needs.upload-whl.result == 'success' || needs.upload-whl.result == 'skipped')
-    env:
-      PYTHON_VERSION: "3.13"
-      TASKFILE_VERSION: "3.45.4"
     steps:
       - name: Log into registry ${{ env.GHCR_REGISTRY }}
         uses: docker/login-action@v3
@@ -180,22 +184,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Download whl artifact
         if: needs.detect.outputs.build_whl == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/download-artifact@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Build library and copy whl into container context
-        if: needs.detect.outputs.build_whl == 'true'
-        env:
-          PUBLIC_IMAGE_REGISTRY_BASE: ${{ env.GHCR_DESTINATION_ORG }}/
-          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.detect.outputs.new_version }}
-        run: |
-          pip install go-task-bin==${{ env.TASKFILE_VERSION }}
-          task init:ci
-          task build
-          cp ./dist/arduino*.whl ./containers/${{ needs.detect.outputs.container }}/
+          name: whl
+          path: ./containers/${{ needs.detect.outputs.container }}/
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
