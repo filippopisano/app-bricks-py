@@ -1,8 +1,8 @@
 # Docker Images Release Process
 
-## Three Docker Images
+## Container Images
 
-The repo produces three container images, each with its own Dockerfile under `containers/`:
+The repo produces container images, each with its own Dockerfile under `containers/`. Each container is described by a `ci.json` file in its directory that drives CI behaviour — no workflow changes are needed when adding a new container.
 
 | Image | Base | Purpose |
 |---|---|---|
@@ -12,51 +12,67 @@ The repo produces three container images, each with its own Dockerfile under `co
 
 ## Release Triggers (Tag-Based)
 
-Each image has a **separate tag namespace** that triggers its workflow:
+A single workflow (`docker-github-publish.yml`) handles all container releases. It is triggered by any `prefix/X.Y.Z` tag. The prefix is matched against each container's `ci.json` to determine what to build.
 
-| Tag pattern | Workflow | Image published |
+| Tag pattern | Container | Extra behaviour |
 |---|---|---|
-| `base/X.Y.Z` | `docker-github-base-image.yml` | `python-base:X.Y.Z` + `:latest` |
-| `release/X.Y.Z` | `docker-github-publish.yml` | `python-apps-base:X.Y.Z` |
-| `ai/X.Y.Z` | `docker-github-publish-ai-containers.yml` | `ei-models-runner:X.Y.Z` |
+| `base/X.Y.Z` | `python-base:X.Y.Z` + `:latest` | — |
+| `release/X.Y.Z` | `python-apps-base:X.Y.Z` | Builds and uploads `.whl` to GitHub Release |
+| `ai/X.Y.Z` | `ei-models-runner:X.Y.Z` | Auto-creates a PR to update compose file references |
+
+If the pushed tag prefix does not match any container's `ci.json`, the workflow exits cleanly with no build.
 
 Version extraction is driven by `setuptools_scm` in `pyproject.toml` with the regex `^(ai|release)/(?P<version>[0-9.]+)$`.
 
-There is also a **manual dev build** workflow (`docker-github-dev-build.yml`) that builds both `python-apps-base` and `ei-models-runner` with the `dev-latest` tag.
+## Adding a New Container
 
-## How Exceptions Are Handled
+1. Create `containers/my-container/Dockerfile`
+2. Create `containers/my-container/ci.json`:
 
-### 1. Conditional Python package build (matrix strategy)
+```json
+{
+  "tag_prefix": "my-prefix",
+  "watch_paths": ["containers/my-container/"],
+  "tag_latest": false,
+  "build_whl": false,
+  "update_compose": false,
+  "build_args": {}
+}
+```
 
-The dev build workflow uses a matrix with a `build_python_package` flag:
+3. Push a tag `my-prefix/X.Y.Z` — the workflow picks it up automatically.
 
-- `python-apps-base` -> `build_python_package: true` — runs `task init:ci` + `task build` to produce the `.whl`
-- `ei-models-runner` -> `build_python_package: false` — skips the Python build entirely
+No workflow file changes required.
 
-This avoids running unnecessary build steps for the AI container.
+## ci.json Reference
 
-### 2. AI container auto-PR for compose file updates
+| Field | Type | Description |
+|---|---|---|
+| `tag_prefix` | string | Tag namespace that triggers this container's release (e.g. `release`) |
+| `watch_paths` | string[] | Paths checked by the skip-rebuild logic |
+| `tag_latest` | bool | Also push a `:latest` tag on release |
+| `build_whl` | bool | Build and upload the Python `.whl` before the Docker build |
+| `update_compose` | bool | After release, open a PR updating `brick_compose.yaml` references |
+| `build_args` | object | Docker build args passed to the Dockerfile (key/value pairs) |
 
-The `ai/*` workflow has unique post-build logic that other workflows don't:
+## Skip-Rebuild Logic
 
-- After pushing the image, it runs `arduino-bricks-update-ai-container-ref -v <VERSION> -r <REGISTRY>`
-- This calls `update_ai_container_references()` in `src/arduino/app_tools/module_listing.py`
-- It then **automatically creates a PR** (branch: `ai-container-release-YYYYMMDDHHMMSS`) to update all brick compose files
+Every release checks whether the container's source files actually changed since the previous tag of the same prefix:
 
-### 3. Selective compose file updates (`only_ei_containers`)
+- **Changed** → full Docker build and push
+- **Unchanged** → `crane copy` re-tags the existing image to the new version (instant, no rebuild)
 
-The core update function `_update_compose_release_version()` in `src/arduino/app_internal/core/module.py` handles two modes:
+This means releasing a new `release/X.Y.Z` when only `ei-models-runner` sources changed will re-tag `python-apps-base` without rebuilding it.
 
-- **Full release** (default): Replaces both `${APPSLAB_VERSION:-...}` and `${DOCKER_REGISTRY_BASE:-...}` variables in compose files
-- **AI-only** (`only_ei_containers=True`): Only updates lines containing `ei-models-runner:X.Y.Z` via a targeted regex, leaving all other image references untouched. It also **skips compose files** that don't contain the `ei-models-runner` substring at all.
+## Dev Build Workflow
 
-### 4. Base image version pinning
+`docker-github-dev-build.yml` triggers on every push to non-`main` branches and builds only the containers whose source files changed (detected via `git diff` against the previous commit). Images are tagged with the sanitized branch name (e.g. `feat/my-feature` → `feat-my-feature`) plus a run-number suffix (e.g. `feat-my-feature-42`).
 
-`python-apps-base` accepts a `BASE_IMAGE_VERSION` build arg (defaults to `latest`). This allows pinning to a specific `python-base` version without rebuilding the base, and the `REGISTRY` arg allows switching between production (`ghcr.io/arduino/`) and alternative registries.
+**Cascade rule**: a change to `python-base` also triggers a rebuild of `python-apps-base`.
 
-### 5. Image size monitoring
-
-`calculate-size-delta.yml` is a manual workflow that builds both `python-base` and `python-apps-base`, measures their sizes using a local Docker registry, and posts a comment on the associated PR. If no PR is found, it falls back to the GitHub Actions Job Summary.
+Can also be triggered manually via `workflow_dispatch` with:
+- `containers` — comma-separated list of containers to build, or `all`
+- `tag` — optional custom image tag
 
 ## Build Characteristics
 
@@ -64,3 +80,7 @@ The core update function `_update_compose_release_version()` in `src/arduino/app
 - **Registry**: `ghcr.io/arduino/app-bricks/`
 - **Caching**: GitHub Actions cache (`type=gha`, `mode=max`)
 - **Release assets**: The `release/*` workflow also uploads the `.whl` to the GitHub Release via `softprops/action-gh-release`
+
+## Image Size Monitoring
+
+`calculate-size-delta.yml` is a manual workflow that builds both `python-base` and `python-apps-base`, measures their sizes using a local Docker registry, and posts a comment on the associated PR. If no PR is found, it falls back to the GitHub Actions Job Summary.
