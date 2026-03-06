@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       container: ${{ steps.detect.outputs.container }}
+      tag_ref: ${{ steps.detect.outputs.tag_ref }}
       new_version: ${{ steps.detect.outputs.new_version }}
       prev_version: ${{ steps.detect.outputs.prev_version }}
       needs_build: ${{ steps.detect.outputs.needs_build }}
@@ -52,6 +53,7 @@ jobs:
 
           TAG_PREFIX="${TAG_REF%%/*}"
           NEW_VERSION="${TAG_REF#*/}"
+          echo "tag_ref=$TAG_REF" >> $GITHUB_OUTPUT
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
           # Find the container whose tag_prefix matches
@@ -132,6 +134,9 @@ jobs:
       - name: Build and upload whl
         env:
           PUBLIC_IMAGE_REGISTRY_BASE: ${{ env.GHCR_DESTINATION_ORG }}/
+          # Explicitly set the version so setuptools_scm does not need the git tag to exist
+          # (handles workflow_dispatch runs where no tag has been pushed yet)
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.detect.outputs.new_version }}
         run: |
           pip install go-task-bin==${{ env.TASKFILE_VERSION }}
           task init:ci
@@ -141,7 +146,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/arduino*.whl
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ needs.detect.outputs.tag_ref }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -177,6 +182,7 @@ jobs:
         if: needs.detect.outputs.build_whl == 'true'
         env:
           PUBLIC_IMAGE_REGISTRY_BASE: ${{ env.GHCR_DESTINATION_ORG }}/
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.detect.outputs.new_version }}
         run: |
           pip install go-task-bin==${{ env.TASKFILE_VERSION }}
           task init:ci
@@ -302,7 +308,7 @@ jobs:
           commit-message: "feat: update ${{ needs.detect.outputs.container }} image references"
           title: "[RELEASE BOT] Update ${{ needs.detect.outputs.container }} image references"
           body: |
-            This PR was automatically generated after re-tagging `${{ needs.detect.outputs.container }}:${{ needs.detect.outputs.new_version }}` (no rebuild).
+            Use `${{ needs.detect.outputs.container }}:${{ needs.detect.outputs.new_version }}` (no rebuild).
           branch: "container-release-${{ needs.detect.outputs.container }}-${{ needs.detect.outputs.new_version }}"
           base: main
           draft: true
