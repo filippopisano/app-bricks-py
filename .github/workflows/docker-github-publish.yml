@@ -12,7 +12,8 @@ on:
 
 env:
   GHCR_REGISTRY: ghcr.io
-  GHCR_DESTINATION_ORG: ghcr.io/arduino
+  # TODO: revert to ghcr.io/arduino before merging to main
+  GHCR_DESTINATION_ORG: ghcr.io/filippopisano
   GH_DESTINATION_REPO: https://github.com/arduino/app-bricks-py
 
 permissions:

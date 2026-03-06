@@ -10,6 +10,6 @@
   "build_whl": true,
   "update_compose": false,
   "build_args": {
-    "REGISTRY": "ghcr.io/arduino/"
+    "REGISTRY": "ghcr.io/filippopisano/"
   }
 }
