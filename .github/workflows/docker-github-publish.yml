@@ -36,6 +36,7 @@ jobs:
       tag_latest: ${{ steps.detect.outputs.tag_latest }}
       build_args: ${{ steps.detect.outputs.build_args }}
       no_match: ${{ steps.detect.outputs.no_match }}
+      prerelease: ${{ steps.detect.outputs.prerelease }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -55,6 +56,11 @@ jobs:
           NEW_VERSION="${TAG_REF#*/}"
           echo "tag_ref=$TAG_REF" >> $GITHUB_OUTPUT
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          if [[ "$NEW_VERSION" =~ rc|alpha|beta ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
 
           # Find the container whose tag_prefix matches
           CONTAINER=""
@@ -147,6 +153,8 @@ jobs:
         with:
           files: dist/arduino*.whl
           tag_name: ${{ needs.detect.outputs.tag_ref }}
+          prerelease: ${{ needs.detect.outputs.prerelease }}
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
