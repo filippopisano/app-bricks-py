@@ -10,6 +10,10 @@ on:
         description: "Comma-separated container names to build, or 'all' for all containers"
         type: string
         default: "all"
+      tag:
+        description: "Custom image tag (optional, defaults to sanitized branch name)"
+        type: string
+        default: ""
 
 env:
   REGISTRY: ghcr.io
@@ -52,8 +56,10 @@ jobs:
           # Fall back to origin/main if BEFORE is the zero SHA (new branch)
           # or if the commit no longer exists (e.g. after a force-push/amend)
           if [[ "$BEFORE" == "$ZERO_SHA" ]] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
-            echo "Before SHA not available, falling back to origin/main"
-            BEFORE=$(git rev-parse origin/main 2>/dev/null || echo "")
+            # New branch or force-push: compare against the merge base with main
+            # so only changes actually made on this branch are detected
+            echo "Before SHA not available, falling back to merge base with origin/main"
+            BEFORE=$(git merge-base HEAD origin/main 2>/dev/null || echo "")
             if [[ -z "$BEFORE" ]]; then
               echo "No base commit found, skipping builds"
               echo "containers=[]" >> $GITHUB_OUTPUT
@@ -147,6 +153,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=branch,suffix=-${{ github.run_number }}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
           images: ghcr.io/${{ github.repository_owner }}/app-bricks/${{ matrix.container }}
 
       - name: Build and push Docker image
