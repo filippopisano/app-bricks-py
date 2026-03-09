@@ -10,8 +10,6 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     if: github.event.ref_type == 'branch'
-    env:
-      ORG: arduino
     steps:
       - name: Sanitize branch name
         id: branch
@@ -22,6 +20,15 @@ jobs:
           SANITIZED=$(echo "$RAW" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/^-//;s/-$//')
           echo "tag=$SANITIZED" >> $GITHUB_OUTPUT
 
+      - name: Detect account type
+        id: account
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          TYPE=$(gh api "/users/$OWNER" --jq '.type')
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -29,6 +36,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.branch.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+          ACCOUNT_TYPE: ${{ steps.account.outputs.type }}
         run: |
           # Discover packages from containers/ directory
           mapfile -t PACKAGES < <(ls -d containers/*/ | xargs -I{} basename {} | sed 's|^|app-bricks/|' | jq -Rr @uri)
@@ -36,9 +45,19 @@ jobs:
           for PKG in "${PACKAGES[@]}"; do
             echo "Processing package: $PKG (tag: $TAG)"
 
+            # Use org or user API based on account type
+            # TODO: hardcode orgs path when merging to upstream from fork
+            if [[ "$ACCOUNT_TYPE" == "Organization" ]]; then
+              API_PATH="/orgs/$OWNER/packages/container/$PKG/versions"
+              DELETE_PATH="/orgs/$OWNER/packages/container/$PKG/versions"
+            else
+              API_PATH="/user/packages/container/$PKG/versions"
+              DELETE_PATH="/user/packages/container/$PKG/versions"
+            fi
+
             # List all versions and find ones that match our branch tag
             VERSIONS=$(gh api \
-              "/orgs/$ORG/packages/container/$PKG/versions" \
+              "$API_PATH" \
               --paginate \
               --jq ".[] | select(.metadata.container.tags[] | . == \"$TAG\") | .id" 2>/dev/null || true)
 
@@ -49,7 +68,7 @@ jobs:
 
             while IFS= read -r VERSION_ID; do
               echo "  Deleting version $VERSION_ID from $PKG"
-              gh api --method DELETE "/orgs/$ORG/packages/container/$PKG/versions/$VERSION_ID" || \
+              gh api --method DELETE "$DELETE_PATH/$VERSION_ID" || \
                 echo "  Warning: failed to delete version $VERSION_ID (may require delete:packages scope)"
             done <<< "$VERSIONS"
           done
