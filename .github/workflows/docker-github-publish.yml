@@ -22,6 +22,7 @@ permissions:
   packages: write
   id-token: write
   pull-requests: write
+  actions: write
 
 jobs:
   detect:
@@ -38,6 +39,7 @@ jobs:
       build_args: ${{ steps.detect.outputs.build_args }}
       no_match: ${{ steps.detect.outputs.no_match }}
       prerelease: ${{ steps.detect.outputs.prerelease }}
+      has_downstream: ${{ steps.detect.outputs.has_downstream }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -86,6 +88,7 @@ jobs:
           echo "build_whl=$(jq -r '.build_whl // false' "$CI_JSON")" >> $GITHUB_OUTPUT
           echo "update_compose=$(jq -r '.update_compose // false' "$CI_JSON")" >> $GITHUB_OUTPUT
           echo "tag_latest=$(jq -r '.tag_latest // false' "$CI_JSON")" >> $GITHUB_OUTPUT
+          echo "has_downstream=$(jq -r 'if (.downstream // []) | length > 0 then "true" else "false" end' "$CI_JSON")" >> $GITHUB_OUTPUT
 
           # Build args: JSON object → multiline KEY=VALUE (safe for GITHUB_OUTPUT)
           BUILD_ARGS=$(jq -r '.build_args // {} | to_entries | map("\(.key)=\(.value)") | join("\n")' "$CI_JSON")
@@ -161,6 +164,7 @@ jobs:
         with:
           files: dist/arduino*.whl
           tag_name: ${{ needs.detect.outputs.tag_ref }}
+          name: ${{ needs.detect.outputs.new_version }}
           prerelease: ${{ needs.detect.outputs.prerelease }}
           generate_release_notes: true
         env:
@@ -315,3 +319,37 @@ jobs:
           branch: "container-release-${{ needs.detect.outputs.container }}-${{ needs.detect.outputs.new_version }}"
           base: main
           draft: true
+
+  trigger-downstream:
+    runs-on: ubuntu-latest
+    needs: [detect, build, retag]
+    if: |
+      always() &&
+      needs.detect.outputs.no_match == 'false' &&
+      needs.detect.outputs.has_downstream == 'true' &&
+      (needs.build.result == 'success' || needs.retag.result == 'success')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trigger downstream container rebuilds
+        run: |
+          git fetch --tags
+          CI_JSON="containers/${{ needs.detect.outputs.container }}/ci.json"
+          DOWNSTREAM=$(jq -r '.downstream[]' "$CI_JSON")
+          for DS in $DOWNSTREAM; do
+            DS_PREFIX=$(jq -r '.tag_prefix' "containers/$DS/ci.json")
+            LATEST_TAG=$(git tag --sort=-version:refname | grep -E "^${DS_PREFIX}/" | head -1)
+            if [[ -z "$LATEST_TAG" ]]; then
+              echo "No tag found for downstream '$DS' (prefix: $DS_PREFIX), skipping"
+              continue
+            fi
+            echo "Triggering rebuild of $DS for tag $LATEST_TAG"
+            gh workflow run docker-github-publish.yml \
+              --ref main \
+              --field tag="$LATEST_TAG"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
