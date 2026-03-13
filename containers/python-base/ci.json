@@ -4,5 +4,6 @@
   "tag_latest": true,
   "build_whl": false,
   "update_compose": false,
-  "build_args": {}
+  "build_args": {},
+  "downstream": ["python-apps-base"]
 }
