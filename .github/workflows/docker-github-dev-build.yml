@@ -67,26 +67,24 @@ jobs:
 
           CHANGED=()
 
-          for CONTAINER_DIR in containers/*/; do
-            CONTAINER=$(basename "$CONTAINER_DIR")
-            if git diff --name-only "$BEFORE" HEAD -- "$CONTAINER_DIR" | grep -q .; then
+          for CI_JSON in containers/*/ci.json; do
+            CONTAINER=$(basename "$(dirname "$CI_JSON")")
+            WATCH_PATHS=$(jq -r '.watch_paths | join(" ")' "$CI_JSON")
+            if git diff --name-only "$BEFORE" HEAD -- $WATCH_PATHS | grep -q .; then
               CHANGED+=("$CONTAINER")
             fi
           done
 
-          # python-apps-base also depends on src/, pyproject.toml, Taskfile.dist.yml
-          if git diff --name-only "$BEFORE" HEAD -- src/ pyproject.toml Taskfile.dist.yml | grep -q .; then
-            if [[ ! " ${CHANGED[*]} " =~ " python-apps-base " ]]; then
-              CHANGED+=("python-apps-base")
-            fi
-          fi
-
-          # Cascade: python-base change also triggers python-apps-base rebuild
-          if [[ " ${CHANGED[*]} " =~ " python-base " ]]; then
-            if [[ ! " ${CHANGED[*]} " =~ " python-apps-base " ]]; then
-              CHANGED+=("python-apps-base")
-            fi
-          fi
+          # Cascade: add downstream containers for each changed container
+          for CONTAINER in "${CHANGED[@]}"; do
+            DOWNSTREAM=$(jq -r '.downstream // [] | .[]' "containers/$CONTAINER/ci.json")
+            for DS in $DOWNSTREAM; do
+              if [[ ! " ${CHANGED[*]} " =~ " $DS " ]]; then
+                echo "Cascading: $DS depends on $CONTAINER"
+                CHANGED+=("$DS")
+              fi
+            done
+          done
 
           if [[ ${#CHANGED[@]} -eq 0 ]]; then
             echo "No container sources changed"
