@@ -16,13 +16,19 @@ A single workflow (`docker-github-publish.yml`) handles all container releases. 
 
 | Tag pattern | Container | Extra behaviour |
 |---|---|---|
-| `base/X.Y.Z` | `python-base:X.Y.Z` + `:latest` | — |
-| `release/X.Y.Z` | `python-apps-base:X.Y.Z` | Builds and uploads `.whl` to GitHub Release |
+| `base/X.Y.Z` | `python-base:X.Y.Z` + `:latest` | Automatically triggers a rebuild of downstream containers |
+| `release/X.Y.Z` | `python-apps-base:X.Y.Z` | Builds and uploads `.whl` to GitHub Release (displayed as `X.Y.Z`) |
 | `ai/X.Y.Z` | `ei-models-runner:X.Y.Z` | Auto-creates a PR to update compose file references |
 
 If the pushed tag prefix does not match any container's `ci.json`, the workflow exits cleanly with no build.
 
-Version extraction is driven by `setuptools_scm` in `pyproject.toml` with the regex `^(ai|release)/(?P<version>[0-9.]+)$`.
+## Downstream Cascade (Release)
+
+When a container is built or retagged, the workflow checks its `downstream` field in `ci.json`. For each downstream container listed, it finds the latest tag for that container and automatically dispatches a new release workflow run. This ensures dependent images are always rebuilt after their base image changes.
+
+For example, pushing `base/X.Y.Z` builds `python-base` and then automatically triggers a new run for the latest `release/X.Y.Z` tag, rebuilding `python-apps-base` on top of the new base.
+
+The dispatch only happens after the upstream build completes successfully.
 
 ## Adding a New Container
 
@@ -36,11 +42,20 @@ Version extraction is driven by `setuptools_scm` in `pyproject.toml` with the re
   "tag_latest": false,
   "build_whl": false,
   "update_compose": false,
-  "build_args": {}
+  "build_args": {},
+  "downstream": []
 }
 ```
 
 3. Push a tag `my-prefix/X.Y.Z` — the workflow picks it up automatically.
+
+To declare that another container depends on yours, add it to `downstream`:
+
+```json
+"downstream": ["my-other-container"]
+```
+
+> **Note**: any container listed in `downstream` must declare `ARG BASE_IMAGE_VERSION` in its Dockerfile. The CI passes the upstream image's tag via this build arg so the downstream image pulls the freshly built version, not `latest`.
 
 No workflow file changes required.
 
@@ -49,11 +64,12 @@ No workflow file changes required.
 | Field | Type | Description |
 |---|---|---|
 | `tag_prefix` | string | Tag namespace that triggers this container's release (e.g. `release`) |
-| `watch_paths` | string[] | Paths checked by the skip-rebuild logic |
+| `watch_paths` | string[] | Paths checked by the skip-rebuild logic and dev build change detection |
 | `tag_latest` | bool | Also push a `:latest` tag on release |
 | `build_whl` | bool | Build and upload the Python `.whl` before the Docker build |
 | `update_compose` | bool | After release, open a PR updating `brick_compose.yaml` references |
 | `build_args` | object | Docker build args passed to the Dockerfile (key/value pairs) |
+| `downstream` | string[] | Containers that depend on this one — rebuilt automatically after this container is built |
 
 ## Skip-Rebuild Logic
 
@@ -66,9 +82,14 @@ This means releasing a new `release/X.Y.Z` when only `ei-models-runner` sources 
 
 ## Dev Build Workflow
 
-`docker-github-dev-build.yml` triggers on every push to non-`main` branches and builds only the containers whose source files changed (detected via `git diff` against the previous commit). Images are tagged with the sanitized branch name (e.g. `feat/my-feature` → `feat-my-feature`) plus a run-number suffix (e.g. `feat-my-feature-42`).
+`docker-github-build.yml` triggers on every push to non-`main` branches and builds only the containers whose `watch_paths` changed (detected via `git diff` against the previous commit). Images are tagged with the sanitized branch name (e.g. `feat/my-feature` → `feat-my-feature`) plus a run-number suffix (e.g. `feat-my-feature-42`).
 
-**Cascade rule**: a change to `python-base` also triggers a rebuild of `python-apps-base`.
+**Dependency ordering**: the detect job splits containers into two groups:
+
+- **Base containers** (`build` job): containers with no upstream being built in the same run — these build in parallel.
+- **Downstream containers** (`build-downstream` job): containers whose upstream is also being built — these wait for the `build` job to complete before starting, and receive `BASE_IMAGE_VERSION=<branch-tag>` as a build arg so they use the freshly built upstream image.
+
+The grouping is driven entirely by the `downstream` field in ci.json — no hardcoded container names in the workflow.
 
 Can also be triggered manually via `workflow_dispatch` with:
 - `containers` — comma-separated list of containers to build, or `all`
