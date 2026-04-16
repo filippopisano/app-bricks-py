@@ -13,8 +13,10 @@ on:
 
 env:
   GHCR_REGISTRY: ghcr.io
-  GHCR_DESTINATION_ORG: ghcr.io/arduino
-  GH_DESTINATION_REPO: https://github.com/arduino/app-bricks-py
+  # TODO: restore to ghcr.io/arduino before merging to upstream
+  GHCR_DESTINATION_ORG: ghcr.io/filippopisano
+  # TODO: restore to https://github.com/arduino/app-bricks-py before merging to upstream
+  GH_DESTINATION_REPO: https://github.com/filippopisano/app-bricks-py
 
 permissions:
   contents: write
